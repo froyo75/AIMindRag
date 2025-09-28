@@ -1,0 +1,1 @@
+{"db_name": "perso_db", "embedding_model": "mxbai-embed-large", "api_key": "", "provider": "ollama", "chunk_size": 200, "chunk_overlap": 150}

@@ -1,0 +1,38 @@
+services:
+  app:
+    build: .
+    container_name: aimindrag
+    ports:
+      - 127.0.0.1:9998:9998/tcp
+    volumes:
+      - /etc/timezone:/etc/timezone:ro
+      - /etc/localtime:/etc/localtime:ro
+      - ./logs:/app/logs
+      - ./caches:/app/caches
+      - ./config:/app/config
+      - ./db:/app/db
+    env_file:
+      - .env
+    restart: always
+    depends_on:
+      - ollama
+
+  ollama:
+    container_name: ollama
+    pull_policy: always
+    tty: true
+    restart: unless-stopped
+    image: docker.io/ollama/ollama:latest
+    ports:
+      - 127.0.0.1:11434:11434/tcp
+    volumes:
+      - ./ollama:/root/.ollama
+    environment:
+      - OLLAMA_KEEP_ALIVE=24h
+    #deploy:
+    #  resources:
+    #    reservations:
+    #      devices:
+    #        - driver: nvidia
+    #          count: all 
+    #          capabilities: [gpu]

@@ -1,0 +1,10 @@
+gradio
+openai
+ollama
+python-dotenv
+fastmcp
+httpx
+chromadb
+langchain
+langchain-text-splitters
+markitdown[all]
