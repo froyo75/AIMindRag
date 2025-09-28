@@ -14,7 +14,7 @@
 - Simple usage with with a friendly web interface using Gradio
 - Support office documents and more (`.txt, .pdf, .md, .json, .xml, outlook.msg, .zip`)
 
-### 🔧 Installation
+### ⏳ Installation
 
 ```shell
 git clone https://github.com/froyo75/AIMindRag.git
