@@ -33,8 +33,6 @@ def run_ui():
 
         with gr.Row():
             with gr.Column(scale=2, min_width=400):
-                gr.HTML("<div style='height: 5px;'></div>")
-
                 # LLM Configuration Block
                 with gr.Group():
                     gr.Markdown("##  LLM Configuration")
@@ -58,7 +56,6 @@ def run_ui():
                             type="password",
                             value="<IF ALREADY CONFIGURED LOADED FROM CONFIG FILE>",
                             interactive=True,
-                            max_lines=1
                         )
                         
                     llm_save_btn = gr.Button("Apply", variant="primary", size="sm")
@@ -78,7 +75,6 @@ def run_ui():
                             label="MCP Client Path",
                             value="http://127.0.0.1:8888/mcp",
                             interactive=True,
-                            max_lines=1
                         )
 
                         mcp_client_transport_type = gr.Dropdown(
@@ -98,7 +94,11 @@ def run_ui():
                             show_search=True,
                             datatype="array",
                             label="MCP Clients",
-                            max_height=100
+                            max_height=100,
+                            row_count=5,
+                            row_limits=None,
+                            column_count=2,
+                            column_limits=None,
                         )
                     
                     with gr.Row():
@@ -108,7 +108,11 @@ def run_ui():
                             show_search=True,
                             datatype="array",
                             label="MCP Tools",
-                            max_height=200
+                            max_height=200,
+                            row_count=5,
+                            row_limits=None,
+                            column_count=2,
+                            column_limits=None,
                         )
 
                 # RAG Management Block
@@ -135,7 +139,7 @@ def run_ui():
                             label="Processing Status",
                             value="No documents to process",
                             interactive=False,
-                            max_lines=10
+                            max_lines=10,
                         )
 
                         with gr.Row():
@@ -151,7 +155,6 @@ def run_ui():
                                 label="Create New Local Vector DB",
                                 value="work_db",
                                 interactive=True,
-                                max_lines=1
                             )
 
                         rag_create_btn = gr.Button("Create", variant="primary", size="sm")
@@ -177,7 +180,6 @@ def run_ui():
                                 type="password",
                                 value="<IF ALREADY CONFIGURED LOADED FROM CONFIG FILE>",
                                 interactive=True,
-                                max_lines=1
                             )
 
                         with gr.Row():
@@ -209,24 +211,23 @@ def run_ui():
                             label="Vector Store Info",
                             value="No documents in vector store",
                             interactive=False,
-                            max_lines=15
+                            max_lines=15,
                         )
             
             # Right column for chat interface
             with gr.Column(scale=3):
                 gr.ChatInterface(
-                    type="messages", 
                     fn=chat,
                     title="🤖 AIMindRag Assistant",
                     additional_inputs=[llm_provider, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results],
                     analytics_enabled=str_to_bool(GRADIO_ANALYTICS_ENABLED),
+                    api_visibility="private",
                     description="Chat with your AI assistant enhanced with MCP tools and RAG knowledge",
                     chatbot=gr.Chatbot(
-                        type="messages",
                         min_height=850,
                         max_height=850,
                         autoscroll=True,
-                        show_copy_button=True,
+                        buttons=["copy"],
                     )
                 )
 
@@ -268,9 +269,9 @@ def run_ui():
         def toggle_api_key(provider: str):
             """Toggle the API key"""
             if provider == "ollama":
-                return gr.update(interactive=False, value="")
+                return gr.update(visible=False)
             else:
-                return gr.update(interactive=True, value="<IF ALREADY CONFIGURED LOADED FROM CONFIG FILE>")
+                return gr.update(visible=True)
 
         def update_llm_models_list(llm_provider: str, llm_model: str, available_llm_models: dict):
             """Update the LLM models list"""
@@ -468,66 +469,77 @@ def run_ui():
             fn=handle_connect,
             inputs=[mcp_client_path, mcp_client_transport_type, mcp_clients, mcp_tools],
             outputs=[mcp_clients, mcp_tools, clients_table, tools_table],
+            api_visibility="private"
         )
         
         mcp_disconnect_btn.click(
             fn=handle_disconnect,
             inputs=[selected_mcp_client, mcp_clients, mcp_tools],
             outputs=[clients_table, tools_table, selected_mcp_client],
+            api_visibility="private"
         )
 
         clients_table.select(
             fn=handle_client_select,
             inputs=[clients_table],
             outputs=[selected_mcp_client],
+            api_visibility="private"
         )
 
         llm_save_btn.click(
             fn=handle_llm_save_config,
             inputs=[llm_provider, llm_model, llm_api_key],
             outputs=[llm_provider, llm_model],
+            api_visibility="private"
         )
 
         llm_provider.change(
             fn=handle_llm_load_config,
             inputs=[llm_provider, llm_model, available_llm_models],
             outputs=[loaded_llm_model, llm_provider, llm_model, llm_api_key],
+            api_visibility="private"
         )
 
         rag_create_btn.click(
             fn=handle_rag_create,
             inputs=[embedding_provider, vector_db_name],
             outputs=[list_vector_db_names, vector_store_info],
+            api_visibility="private"
         )
 
         rag_delete_btn.click(
             fn=handle_rag_delete,
             inputs=[list_vector_db_names, embedding_provider],
             outputs=[list_vector_db_names, vector_store_info],
+            api_visibility="private"
         )
 
         rag_save_btn.click(
             fn=handle_rag_save_config,
             inputs=[embedding_provider, embedding_model, embedding_api_key, list_vector_db_names, chunk_size, chunk_overlap],
             outputs=[embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, vector_store_info],
+            api_visibility="private"
         )
 
         embedding_provider.change(
             fn=handle_rag_load_config,
             inputs=[embedding_provider, embedding_model, list_vector_db_names, chunk_size, chunk_overlap, available_embedding_models],
             outputs=[loaded_embedding_model, embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, vector_store_info],
+            api_visibility="private"
         )
 
         process_docs_btn.click(
             fn=handle_process_docs,
             inputs=[embedding_provider, file_upload],
             outputs=[doc_status, vector_store_info, file_upload, list_vector_db_names],
+            api_visibility="private"
         )
 
         ui.load(
             fn=init_ui,
             inputs=[llm_provider, embedding_provider],
             outputs=[llm_provider, llm_model, llm_api_key, embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, list_vector_db_names, vector_store_info, available_llm_models, available_embedding_models],
+            api_visibility="private"
         )
 
     try:
@@ -535,7 +547,8 @@ def run_ui():
             server_name=GRADIO_BIND_ADDRESS,
             server_port=int(GRADIO_PORT),
             share=str_to_bool(GRADIO_SHARE),
-            pwa=str_to_bool(GRADIO_PWA)
+            pwa=str_to_bool(GRADIO_PWA),
+            footer_links=["gradio", "settings"]
         )
         ui_logger.info("UI successfully started")
     except Exception as e:
