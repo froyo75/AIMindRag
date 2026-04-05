@@ -105,6 +105,7 @@ def _normalize_tool_outputs(tool_id: str, tool_output: str, llm_provider: str) -
     else:
         normalized_tool_output = {
             "role": "tool",
+            "tool_call_id": tool_id,
             "content": tool_output
         }
     return normalized_tool_output
