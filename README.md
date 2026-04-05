@@ -1,14 +1,16 @@
-# AIMindRag
-
-**AIMindRag** is a user-friendly web app that lets you interact with your favorite LLMs, combining a local RAG system with the ability to connect to external services via the MCP protocol for extended functionality.
-
+<p align="center" style="margin:0;">
+  <img src="./images/AIMindRAG_logo.svg" alt="FineP0D logo" width="850" />
+</p>
+<p align="center" style="margin-top:6px;">
+  <b>A web app that lets you interact with your favorite LLMs, with RAG for local knowledge retrieval and MCP for external service integrations.</b>
+</p>
 <p align="center">
   <img src="./images/aimindrag.png" alt="AIMindRag UI" width="1000"/>
 </p>
 
 ## ✔️ Features
 
-- Support OpenAI or local LLM (ollama) + embeddings for prioritizing data privacy
+- Support OpenAI, Claude or local LLM (ollama) + embeddings for prioritizing data privacy
 - Support local/external MCP servers (http streamable/stdio) using [FastMCP](https://github.com/jlowin/fastmcp)
 - Local RAG system using [ChromaDB](https://github.com/chroma-core/chroma)
 - Simple usage with with a friendly web interface using Gradio
@@ -113,15 +115,16 @@ curl https://ollama.ai/install.sh | sh
 # Export OLLAMA_HOST variable to use on ...
 export OLLAMA_HOST=https://<a-random-string>.ngrok-free.app
 
-# Pulling the Mixedbread AI embeddings model
-ollama pull mxbai-embed-large
+# Pulling the Qwen embeddings model
+ollama pull qwen3-embedding:4b
 
-# Pulling the latest OpenAI’s open-weight model
-ollama pull gpt-oss:latest
+# Pulling the Qwen model
+ollama pull qwen3.5:9b
 
 # List current installed models
 ollama list
 
-# Set default ollama url on the .env file to use with app
-LLM_DEFAULT_OLLAMA_URL=https://<a-random-string>.ngrok-free.app
+# Trigger the models in RAM/VRAM: INFOS: Disk → CPU RAM → GPU VRAM
+ollama run qwen3-embedding:4b "hi"
+ollama run qwen3.5:9b "hi"
 ```

@@ -1,5 +1,6 @@
 gradio
 openai
+anthropic
 ollama
 python-dotenv
 fastmcp

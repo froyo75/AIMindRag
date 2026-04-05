@@ -4,19 +4,19 @@ from utils.logger import get_logger
 
 file_logger = get_logger(__name__)
 
-def convert_to_markdown(file_path: str):
+def convert_to_markdown(file_path: str) -> str:
     try:
         path = Path(file_path)
         if not path.exists():
             raise FileNotFoundError(f"File not found: {file_path}")
-        md = MarkItDown(enable_plugins=False)
+        md = MarkItDown()
         result = md.convert(file_path)
         return result.text_content
     except Exception as e:
         file_logger.error(f"Error converting file to markdown: {e}")
         return None
 
-def get_file_content(file_path: str):
+def get_file_content(file_path: str) -> str:
     try:
         path = Path(file_path)
         if not path.exists():

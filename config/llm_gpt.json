@@ -1,1 +1,1 @@
-{"model": "gpt-5-mini", "api_key": "", "provider": "gpt", "max_tokens": "2048", "temperature": "1"}
+{"model": "gpt-5.4-nano", "api_key": "", "provider": "gpt", "max_tokens": "0", "temperature": "0.7", "reasoning_effort": "medium", "base_url": ""}

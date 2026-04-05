@@ -2,8 +2,8 @@ import os
 import gradio as gr
 from utils.helpers import str_to_bool, delete_dir, create_dir
 from utils.config import GRADIO_DEBUG, GRADIO_BIND_ADDRESS, GRADIO_PORT, GRADIO_TEMP_FOLDER_PATH, GRADIO_SHARE, GRADIO_PWA, GRADIO_ANALYTICS_ENABLED, RAG_DB_PATH, RAG_MARKDOWN, RAG_DEFAULT_DB_NAME, \
-    LLM_DEFAULT_PROVIDER, LLM_DEFAULT_MODEL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DEFAULT_EMBEDDING_MODEL, RAG_DEFAULT_MAX_NB_RESULTS
-from utils.load import available_llm_providers
+    LLM_DEFAULT_PROVIDER, LLM_DEFAULT_MODEL, LLM_DEFAULT_URL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DEFAULT_EMBEDDING_MODEL, RAG_DEFAULT_MAX_NB_RESULTS, LLM_DEFAULT_REASONING_EFFORT
+from utils.load import available_llm_providers, available_rag_providers
 from modules.chat import chat
 from modules.mcp import MCPClient
 from modules.llm import LLMClient
@@ -14,29 +14,51 @@ from pathlib import Path
 from utils.logger import get_logger
 
 ui_logger = get_logger(__name__)
+
 # Set the environment variables
 os.environ['GRADIO_TEMP_DIR'] = GRADIO_TEMP_FOLDER_PATH
 os.environ['GRADIO_DEBUG'] = GRADIO_DEBUG
 os.environ['GRADIO_ANALYTICS_ENABLED'] = GRADIO_ANALYTICS_ENABLED
 
+# CSS for centering the checkbox
+css = """
+.center-checkbox .block {
+    min-height: unset !important;
+    padding: 0 !important;
+}
+
+.center-checkbox {
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    padding-top: 24px !important;
+}
+
+.main-layout-row {
+    flex-direction: row-reverse !important;
+}
+"""
+
 def run_ui():
     """Run the Gradio UI"""
-    with gr.Blocks(title="MCP Client") as ui:
+    with gr.Blocks(title="MCP Client", css=css) as ui:
         loaded_llm_model = gr.State("")
         loaded_embedding_model = gr.State("")
         selected_mcp_client = gr.State("")
+        llm_reasoning_effort = gr.State(False)
+        llm_base_url = gr.State("")
         use_tools = gr.State(True)
         mcp_clients = gr.State({})
         mcp_tools = gr.State({})
         available_llm_models = gr.State({})
         available_embedding_models = gr.State({})
+        settings_sidebar_hidden = gr.State(False)
 
-        with gr.Row():
-            with gr.Column(scale=2, min_width=400):
+        with gr.Row(elem_classes=["main-layout-row"]):
+            with gr.Column(scale=2, min_width=400, visible=True) as settings_column:
                 # LLM Configuration Block
                 with gr.Group():
                     gr.Markdown("##  LLM Configuration")
-                    
                     with gr.Row():
                         llm_provider = gr.Dropdown(
                             label="LLM Provider",
@@ -54,8 +76,32 @@ def run_ui():
                         llm_api_key = gr.Textbox(
                             label="LLM API KEY",
                             type="password",
-                            value="<IF ALREADY CONFIGURED LOADED FROM CONFIG FILE>",
+                            value="",
                             interactive=True,
+                            info="Leave empty if already set",
+                        )
+
+                        llm_base_url = gr.Textbox(
+                            label="LLM Base URL (only for Ollama)",
+                            value=LLM_DEFAULT_URL,
+                            interactive=True,
+                        )
+
+                    with gr.Row():
+                    
+                        llm_reasoning_effort = gr.Dropdown(
+                            label="Reasoning effort",
+                            choices=["minimal", "low", "medium", "high", "xhigh", "max"],
+                            value=LLM_DEFAULT_REASONING_EFFORT,
+                            interactive=True,
+                            info="Take effect depending on the LLM model.",
+                        )
+
+                        llm_use_thinking = gr.Checkbox(
+                            label="Use Reasoning",
+                            value=False,
+                            interactive=True,
+                            elem_classes=["center-checkbox"],
                         )
                         
                     llm_save_btn = gr.Button("Apply", variant="primary", size="sm")
@@ -121,7 +167,7 @@ def run_ui():
 
                     use_rag = gr.Checkbox(
                         label="Use RAG",
-                        value=True,
+                        value=False,
                         interactive=True,
                     )
                     
@@ -169,8 +215,8 @@ def run_ui():
 
                         with gr.Row():
                             embedding_provider = gr.Dropdown(
-                                label="Embedding Provider",
-                                choices=available_llm_providers,
+                                label="Embedding Provider (apply to set)",
+                                choices=available_rag_providers,
                                 value=LLM_DEFAULT_EMBEDDING_PROVIDER,
                                 interactive=True,
                             )
@@ -178,7 +224,7 @@ def run_ui():
                             embedding_api_key = gr.Textbox(
                                 label="Embedding API KEY",
                                 type="password",
-                                value="<IF ALREADY CONFIGURED LOADED FROM CONFIG FILE>",
+                                value="",
                                 interactive=True,
                             )
 
@@ -187,6 +233,12 @@ def run_ui():
                                 label="Embedding Model",
                                 value=LLM_DEFAULT_EMBEDDING_MODEL,
                                 allow_custom_value=True,
+                            )
+
+                            embedding_base_url = gr.Textbox(
+                                label="Embedding Base URL (only for Ollama)",
+                                value=LLM_DEFAULT_URL,
+                                interactive=True,
                             )
                         
                         with gr.Row():
@@ -205,6 +257,14 @@ def run_ui():
                                 step=50
                             )
 
+                            batch_size = gr.Slider(
+                                label="Batch Size",
+                                minimum=100,
+                                maximum=8192,
+                                value=512,
+                                step=1
+                            )
+
                         rag_save_btn = gr.Button("Apply", variant="primary", size="sm")
                         
                         vector_store_info = gr.Textbox(
@@ -216,32 +276,40 @@ def run_ui():
             
             # Right column for chat interface
             with gr.Column(scale=3):
+                toggle_settings_btn = gr.Button(
+                    "Hide settings panel",
+                    size="sm",
+                    variant="secondary",
+                )
                 gr.ChatInterface(
                     fn=chat,
                     title="🤖 AIMindRag Assistant",
-                    additional_inputs=[llm_provider, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results],
+                    additional_inputs=[llm_provider, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking],
                     analytics_enabled=str_to_bool(GRADIO_ANALYTICS_ENABLED),
+                    save_history=True,
                     api_visibility="private",
-                    description="Chat with your AI assistant enhanced with MCP tools and RAG knowledge",
                     chatbot=gr.Chatbot(
                         min_height=850,
                         max_height=850,
                         autoscroll=True,
                         buttons=["copy"],
+                        reasoning_tags=[('<think>', '</think>')],
+                        allow_tags=["think"],
                     )
                 )
 
-        def init_ui(llm_provider, embedding_provider):
+        def init_ui(llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url):
             """Initialize the UI"""
             clean_caches()
             vector_db_names = get_vector_store_list()
             available_llm_models, available_embedding_models = get_available_llm_models()
-            llm_model, gr_llm_provider, gr_llm_model, gr_llm_api_key = handle_llm_load_config(llm_provider, None, available_llm_models)
-            embedding_model, gr_embedding_provider, gr_embedding_model, gr_chunk_size, gr_chunk_overlap, gr_embedding_api_key, vector_store_info = handle_rag_load_config(embedding_provider, None, None, None, None, available_embedding_models)
-            gr_llm_models = update_llm_models_list(llm_provider, llm_model, available_llm_models)
+            llm_model, gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_llm_reasoning_effort, gr_llm_base_url = handle_llm_load_config(
+                llm_provider, None, available_llm_models, llm_reasoning_effort, llm_base_url)
+            embedding_model, gr_embedding_provider, gr_embedding_model, gr_chunk_size, gr_chunk_overlap, gr_batch_size, gr_embedding_api_key, vector_store_info, gr_embedding_base_url = handle_rag_load_config(
+                embedding_provider, None, None, None, None, None, available_embedding_models, embedding_base_url)
             gr_embedding_models = update_embedding_models_list(embedding_provider, embedding_model, available_embedding_models)
-            return gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_embedding_provider, gr_embedding_models, gr_chunk_size, gr_chunk_overlap, \
-                gr_embedding_api_key, update_vector_db_names(vector_db_names), vector_store_info, available_llm_models, available_embedding_models
+            return gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_llm_reasoning_effort, gr_llm_base_url, gr_embedding_provider, gr_embedding_models, gr_chunk_size, gr_chunk_overlap, gr_batch_size, \
+                gr_embedding_api_key, gr_embedding_base_url, update_vector_db_names(vector_db_names), vector_store_info, available_llm_models, available_embedding_models
 
         def get_available_llm_models():
             """Get the available LLM models"""
@@ -266,12 +334,20 @@ def run_ui():
                     available_embedding_models[llm_provider] = []
             return available_llm_models, available_embedding_models
 
+        def toggle_base_url(provider: str):
+            """Toggle the base URL"""
+            if provider == "ollama":
+                return gr.update(visible=True)
+            else:
+                return gr.update(visible=False)
+
         def toggle_api_key(provider: str):
             """Toggle the API key"""
             if provider == "ollama":
                 return gr.update(visible=False)
             else:
                 return gr.update(visible=True)
+                
 
         def update_llm_models_list(llm_provider: str, llm_model: str, available_llm_models: dict):
             """Update the LLM models list"""
@@ -365,26 +441,37 @@ def run_ui():
                 selected_client = str(table_data.iloc[evt.index[0], 0])
             return selected_client
         
-        def handle_llm_save_config(llm_provider: str, llm_model: str, llm_api_key: str):
+        def handle_llm_save_config(llm_provider: str, llm_model: str, llm_api_key: str, llm_reasoning_effort: str, llm_base_url: str):
             """Handle the LLM save config"""
-            saved_config = handle_llm_config(llm_provider, llm_model, llm_api_key, "save")
+            saved_config = handle_llm_config(llm_provider, llm_model, llm_api_key, "save", llm_reasoning_effort, llm_base_url)
             if not saved_config["success"]:
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
             return llm_provider, gr.update(value=llm_model)
         
-        def handle_llm_load_config(llm_provider: str, llm_model: str, available_llm_models: dict):
+        def handle_llm_load_config(llm_provider: str, llm_model: str, available_llm_models: dict, llm_reasoning_effort: str, llm_base_url: str):
             """Handle the LLM load config"""
-            loaded_config = handle_llm_config(llm_provider, None, None, "load")
+            reasoning_effort = llm_reasoning_effort
+            base_url = llm_base_url
+            loaded_config = handle_llm_config(llm_provider, None, None, "load", llm_reasoning_effort, llm_base_url)
             if not loaded_config["success"]:
                 gr.Warning(loaded_config["message"])
             else:
                 llm_provider = loaded_config["data"]["provider"]
                 llm_model = loaded_config["data"]["model"]
+                reasoning_effort = loaded_config["data"]["reasoning_effort"]
+                base_url = loaded_config["data"]["base_url"]
                 gr.Info(loaded_config["message"])
             gr_llm_model = update_llm_models_list(llm_provider, llm_model, available_llm_models)
-            return llm_model, gr.update(value=llm_provider), gr_llm_model, toggle_api_key(llm_provider)
+            return (
+                llm_model,
+                gr.update(value=llm_provider),
+                gr_llm_model,
+                toggle_api_key(llm_provider),
+                gr.update(value=reasoning_effort),
+                gr.update(value=base_url, visible=(llm_provider == "ollama")),
+            )
         
         def handle_rag_create(embedding_provider: str, vector_name: str):
             """Handle the RAG create"""
@@ -410,19 +497,20 @@ def run_ui():
                 gr.Info(deleted_vector["message"])
             return update_vector_db_names(vector_db_names), vector_store_info
 
-        def handle_rag_save_config(embedding_provider: str, embedding_model: str, embedding_api_key: str, vector_name: str, chunk_size: int, chunk_overlap: int):
+        def handle_rag_save_config(embedding_provider: str, embedding_model: str, embedding_api_key: str, vector_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, embedding_base_url: str):
             """Handle the RAG save config"""
-            saved_config = handle_rag_config(embedding_provider, embedding_model, embedding_api_key, vector_name, chunk_size, chunk_overlap, "save")
+            saved_config = handle_rag_config(embedding_provider, embedding_model, embedding_api_key, vector_name, chunk_size, chunk_overlap, batch_size, "save", embedding_base_url)
             vector_store_info = update_vector_store_info(embedding_provider)
             if not saved_config["success"]:
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
-            return embedding_provider, gr.update(value=embedding_model), gr.update(value=chunk_size), gr.update(value=chunk_overlap), toggle_api_key(embedding_provider), vector_store_info
+            return embedding_provider, gr.update(value=embedding_model), gr.update(value=chunk_size), gr.update(value=chunk_overlap), gr.update(value=int(batch_size)), toggle_api_key(embedding_provider), toggle_base_url(embedding_provider), vector_store_info
         
-        def handle_rag_load_config(embedding_provider: str, embedding_model: str, vector_name: str, chunk_size: int, chunk_overlap: int, available_embedding_models: dict):
+        def handle_rag_load_config(embedding_provider: str, embedding_model: str, vector_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, available_embedding_models: dict, embedding_base_url: str):
             """Handle the RAG load config"""
-            loaded_config = handle_rag_config(embedding_provider, None, None, None, None, None, "load")
+            base_url = embedding_base_url
+            loaded_config = handle_rag_config(embedding_provider, None, None, None, None, None, None, "load", embedding_base_url)
             vector_store_info = update_vector_store_info(embedding_provider)
             if not loaded_config["success"]:
                 gr.Warning(loaded_config["message"])
@@ -431,9 +519,11 @@ def run_ui():
                 embedding_model = loaded_config["data"]["embedding_model"]
                 chunk_size = loaded_config["data"]["chunk_size"]
                 chunk_overlap = loaded_config["data"]["chunk_overlap"]
+                batch_size = int(loaded_config["data"]["batch_size"])
+                base_url = loaded_config["data"]["base_url"]
                 gr.Info(loaded_config["message"])
             gr_embedding_model = update_embedding_models_list(embedding_provider, embedding_model, available_embedding_models)
-            return embedding_model, gr.update(value=embedding_provider), gr_embedding_model, gr.update(value=chunk_size), gr.update(value=chunk_overlap), toggle_api_key(embedding_provider), vector_store_info
+            return embedding_model, gr.update(value=embedding_provider), gr_embedding_model, gr.update(value=chunk_size), gr.update(value=chunk_overlap), gr.update(value=batch_size), toggle_api_key(embedding_provider), vector_store_info, gr.update(value=base_url, visible=(embedding_provider == "ollama"))
 
         def handle_process_docs(embedding_provider: str, file_upload: list, ):
             """Handle the process docs for RAG"""
@@ -457,6 +547,16 @@ def run_ui():
                 vector_store_info = update_vector_store_info(embedding_provider)
                 yield "Documents processed successfully", vector_store_info, file_upload_status, update_vector_db_names(vector_db_names)
 
+        def toggle_settings_sidebar(hidden: bool):
+            new_hidden = not hidden
+            button_label = "Show settings panel" if new_hidden else "Hide settings panel"
+            settings_column_visibility = gr.update(visible=not new_hidden)
+            return (
+                new_hidden,
+                settings_column_visibility,
+                button_label,
+            )
+        
         def clean_caches():
             """Clean the gradio caches"""
             success = delete_dir(GRADIO_TEMP_FOLDER_PATH, remove_root=False)
@@ -488,15 +588,15 @@ def run_ui():
 
         llm_save_btn.click(
             fn=handle_llm_save_config,
-            inputs=[llm_provider, llm_model, llm_api_key],
+            inputs=[llm_provider, llm_model, llm_api_key, llm_reasoning_effort, llm_base_url],
             outputs=[llm_provider, llm_model],
             api_visibility="private"
         )
 
         llm_provider.change(
             fn=handle_llm_load_config,
-            inputs=[llm_provider, llm_model, available_llm_models],
-            outputs=[loaded_llm_model, llm_provider, llm_model, llm_api_key],
+            inputs=[llm_provider, llm_model, available_llm_models, llm_reasoning_effort, llm_base_url],
+            outputs=[loaded_llm_model, llm_provider, llm_model, llm_api_key, llm_reasoning_effort, llm_base_url],
             api_visibility="private"
         )
 
@@ -516,15 +616,15 @@ def run_ui():
 
         rag_save_btn.click(
             fn=handle_rag_save_config,
-            inputs=[embedding_provider, embedding_model, embedding_api_key, list_vector_db_names, chunk_size, chunk_overlap],
-            outputs=[embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, vector_store_info],
+            inputs=[embedding_provider, embedding_model, embedding_api_key, list_vector_db_names, chunk_size, chunk_overlap, batch_size, embedding_base_url],
+            outputs=[embedding_provider, embedding_model, chunk_size, chunk_overlap, batch_size, embedding_api_key, embedding_base_url, vector_store_info],
             api_visibility="private"
         )
 
         embedding_provider.change(
             fn=handle_rag_load_config,
-            inputs=[embedding_provider, embedding_model, list_vector_db_names, chunk_size, chunk_overlap, available_embedding_models],
-            outputs=[loaded_embedding_model, embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, vector_store_info],
+            inputs=[embedding_provider, embedding_model, list_vector_db_names, chunk_size, chunk_overlap, batch_size, available_embedding_models, embedding_base_url],
+            outputs=[loaded_embedding_model, embedding_provider, embedding_model, chunk_size, chunk_overlap, batch_size, embedding_api_key, vector_store_info, embedding_base_url],
             api_visibility="private"
         )
 
@@ -535,14 +635,22 @@ def run_ui():
             api_visibility="private"
         )
 
+        toggle_settings_btn.click(
+            fn=toggle_settings_sidebar,
+            inputs=[settings_sidebar_hidden],
+            outputs=[settings_sidebar_hidden, settings_column, toggle_settings_btn],
+            api_visibility="private",
+        )
+
         ui.load(
             fn=init_ui,
-            inputs=[llm_provider, embedding_provider],
-            outputs=[llm_provider, llm_model, llm_api_key, embedding_provider, embedding_model, chunk_size, chunk_overlap, embedding_api_key, list_vector_db_names, vector_store_info, available_llm_models, available_embedding_models],
+            inputs=[llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url],
+            outputs=[llm_provider, llm_model, llm_api_key, llm_reasoning_effort, llm_base_url, embedding_provider, embedding_model, chunk_size, chunk_overlap, batch_size, embedding_api_key, embedding_base_url, list_vector_db_names, vector_store_info, available_llm_models, available_embedding_models],
             api_visibility="private"
         )
 
     try:
+        ui.queue()
         ui.launch(
             server_name=GRADIO_BIND_ADDRESS,
             server_port=int(GRADIO_PORT),

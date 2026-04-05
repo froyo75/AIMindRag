@@ -1,1 +1,1 @@
-{"db_name": "work_db", "embedding_model": "text-embedding-3-small", "api_key": "", "provider": "gpt", "chunk_size": 200, "chunk_overlap": 150}
+{"db_name": "perso_db", "embedding_model": "text-embedding-3-large", "api_key": "", "provider": "gpt", "chunk_size": 1000, "chunk_overlap": 150, "batch_size": 8192, "base_url": ""}

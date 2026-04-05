@@ -1,5 +1,5 @@
-from utils.config import LLM_DEFAULT_OLLAMA_URL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DEFAULT_EMBEDDING_MODEL, RAG_CONFIG_DIR_PATH, RAG_DB_PATH, RAG_DEFAULT_COLLECTION_NAME, RAG_DEFAULT_DB_NAME, RAG_DEFAULT_MAX_NB_RESULTS, \
-    RAG_DEFAULT_CHUNK_SIZE, RAG_DEFAULT_CHUNK_OVERLAP
+from utils.config import LLM_DEFAULT_URL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DEFAULT_EMBEDDING_MODEL, RAG_CONFIG_DIR_PATH, RAG_DB_PATH, RAG_DEFAULT_COLLECTION_NAME, RAG_DEFAULT_DB_NAME, RAG_DEFAULT_MAX_NB_RESULTS, \
+    RAG_DEFAULT_BATCH_SIZE, RAG_DEFAULT_CHUNK_SIZE, RAG_DEFAULT_CHUNK_OVERLAP
 from utils.load import available_rag_config_providers
 from utils.helpers import apply_config, create_dir, delete_dir, safe_path, delete_file, list_dirs
 from openai import OpenAI
@@ -8,23 +8,23 @@ from dataclasses import dataclass
 import chromadb
 import uuid
 from pathlib import Path
-from langchain.text_splitter import MarkdownTextSplitter, RecursiveCharacterTextSplitter
+from langchain_text_splitters import MarkdownTextSplitter, RecursiveCharacterTextSplitter
 from modules.file import convert_to_markdown, get_file_content
 from utils.logger import get_logger
 
 rag_logger = get_logger(__name__)
 
-def get_vector_store_list():
+def get_vector_store_list() -> list:
     """Get the list of vector stores"""
     vector_db_list = list_dirs(RAG_DB_PATH)
     return vector_db_list
 
-def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name: str, chunk_size: int, chunk_overlap: int, action: str):
+def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, action: str, base_url: str) -> dict:
     """Handle RAG configuration creation and deletion"""
     config_file = available_rag_config_providers.get(provider)
     success = False
     message = "Invalid action"
-    data = {"provider": provider, "embedding_model": embedding_model, "db_name": db_name, "chunk_size": chunk_size, "chunk_overlap": chunk_overlap}
+    data = {"provider": provider, "embedding_model": embedding_model, "db_name": db_name, "chunk_size": chunk_size, "chunk_overlap": chunk_overlap, "batch_size": batch_size}
     create_dir(RAG_CONFIG_DIR_PATH)
 
     if not config_file:
@@ -41,6 +41,12 @@ def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name
             success, current_config = apply_config(config_file_path, "r")
             if not success:
                 current_config = {}
+
+            if provider == "ollama":
+                url = base_url or current_config.get("base_url") or LLM_DEFAULT_URL
+            else:
+                url = ""
+
             config = {
                 "db_name": db_name or current_config.get("db_name") or RAG_DEFAULT_DB_NAME,
                 "embedding_model": embedding_model or current_config.get("embedding_model") or LLM_DEFAULT_EMBEDDING_MODEL,
@@ -48,6 +54,8 @@ def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name
                 "provider": provider or current_config.get("provider") or LLM_DEFAULT_EMBEDDING_PROVIDER,
                 "chunk_size": chunk_size or current_config.get("chunk_size") or RAG_DEFAULT_CHUNK_SIZE,
                 "chunk_overlap": chunk_overlap or current_config.get("chunk_overlap") or RAG_DEFAULT_CHUNK_OVERLAP,
+                "batch_size": batch_size or current_config.get("batch_size") or RAG_DEFAULT_BATCH_SIZE,
+                "base_url": url,
             }
 
             success, _ = apply_config(config_file_path, "w", config)
@@ -57,7 +65,7 @@ def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name
             message = "RAG configuration loaded successfully" if success else "Failed to load RAG configuration (check if the configuration file exists or apply for new configuration)"
     return {"success": success, "message": message, "data": data}
 
-def handle_vector_db(vector_name: str, action: str):
+def handle_vector_db(vector_name: str, action: str) -> dict:
     """Handle vector database creation and deletion"""
     success = False
     message = "Invalid action"
@@ -77,7 +85,7 @@ def handle_vector_db(vector_name: str, action: str):
                     message = f"Vector DB '{vector_name}' created successfully"
                     success = True
                 db_client = chromadb.PersistentClient(path=vector_db_path, settings=chromadb.Settings(anonymized_telemetry=False))
-            except Exception:
+            except Exception as e:
                 success = False
                 message = f"Failed to create vector DB '{vector_name}'"
                 rag_logger.error(f"Failed to create vector DB '{vector_name}': {e}")
@@ -86,7 +94,7 @@ def handle_vector_db(vector_name: str, action: str):
             message = f"Vector DB '{vector_name}' deleted successfully" if success else f"Failed to delete vector DB '{vector_name}'"
     return {"success": success, "message": message, "db_client": db_client}
 
-def handle_chunk_documents(document_content: str, chunk_size: int, chunk_overlap: int, markdown: bool = False):
+def handle_chunk_documents(document_content: str, chunk_size: int, chunk_overlap: int, markdown: bool = False) -> list:
     if markdown:
         semantic_text_splitter = MarkdownTextSplitter(
             chunk_size=chunk_size,
@@ -102,12 +110,14 @@ def handle_chunk_documents(document_content: str, chunk_size: int, chunk_overlap
 
 @dataclass
 class RAGConfig:
-    provider: str = "gpt"
-    embedding_model: str = "text-embedding-3-small"
+    provider: str = ""
+    embedding_model: str = ""
     api_key: str = ""
-    db_name: str = "rag_db"
+    db_name: str = ""
     chunk_size: int = 1000
     chunk_overlap: int = 200
+    batch_size: int = 512
+    base_url: str = ""
     
 class RAGClient:
     def __init__(self, provider: str):
@@ -117,7 +127,7 @@ class RAGClient:
 
     def _initialize_client(self):
         """Initialize the RAG client"""
-        loaded_config = handle_rag_config(self.provider, None, None, None, None, None, "load")
+        loaded_config = handle_rag_config(self.provider, None, None, None, None, None, None, "load", None)
         if not loaded_config["success"]:
             rag_logger.error(loaded_config["message"])
             raise ValueError(loaded_config["message"])
@@ -143,7 +153,7 @@ class RAGClient:
     
     def _init_ollama(self):
         """Initialize Ollama client"""
-        url = LLM_DEFAULT_OLLAMA_URL
+        url = self.config.base_url or LLM_DEFAULT_URL
         client = Client(host=url)
         return client
 
@@ -156,48 +166,49 @@ class RAGClient:
             rag_logger.error(f"Error initializing Chroma client: {str(e)}")
             raise Exception(f"Error initializing Chroma client: {str(e)}")
 
-    def generate_embedding(self, content: str):
+    def generate_embedding(self, texts: list) -> list:
         """Generate embedding based on the LLM type"""
         if self.config.provider == "gpt":
-            return self._get_openai_embedding(content)
+            return self._get_openai_embedding(texts)
         elif self.config.provider == "ollama":
-            return self._get_ollama_embedding(content)
+            return self._get_ollama_embedding(texts)
         else:
             rag_logger.error(f"Unsupported provider: {self.provider}")
             raise ValueError(f"Unsupported provider: {self.provider}")
     
-    def _get_openai_embedding(self, content: str):
+    def _get_openai_embedding(self, texts: list) -> list:
         """Generate embedding using OpenAI API"""
         try:
             request_params = {
                 "model": self.config.embedding_model,
-                "input": content,
+                "input": texts,
                 "encoding_format": "float",
             }
             
-            response = self.embedding_client.embeddings.create(**request_params)        
-            return response.data[0].embedding
+            response = self.embedding_client.embeddings.create(**request_params)    
+            embeddings = [d.embedding for d in response.data]
+            return embeddings
 
         except Exception as e:
             rag_logger.error(f"Error generating OpenAI response: {str(e)}")
             raise Exception(f"Error generating OpenAI response: {str(e)}")
     
-    def _get_ollama_embedding(self, content: str):
+    def _get_ollama_embedding(self, texts: list) -> list:
         """Generate embedding using Ollama API"""
         try:
             request_params = {
                 "model": self.config.embedding_model,
-                "input": content,
+                "input": texts,
             }
 
             response = self.embedding_client.embed(**request_params)
-            return response['embeddings'][0]
+            return response["embeddings"]
                             
         except Exception as e:
             rag_logger.error(f"Error generating Ollama response: {str(e)}")
             raise Exception(f"Error generating Ollama response: {str(e)}")
 
-    def get_nb_records(self):
+    def get_nb_records(self) -> int:
         """Get the number of records in the database"""
         return self.db_client_collection.count()
 
@@ -211,25 +222,27 @@ class RAGClient:
                 raise Exception(f"Error processing file content: {document}")
             doc_id = str(uuid.uuid5(uuid.NAMESPACE_DNS, doc_content))
             chunks = handle_chunk_documents(doc_content, self.config.chunk_size, self.config.chunk_overlap, markdown)
-            for i, chunk in enumerate(chunks):
-                chunk_id = f"{doc_id}_chunk{i}"
-                embedding = self.generate_embedding(chunk)
+            max_batch_size = int(self.config.batch_size or RAG_DEFAULT_BATCH_SIZE)
+            for start in range(0, len(chunks), max_batch_size):
+                batch = chunks[start : start + max_batch_size]
+                embeddings = self.generate_embedding(batch)
+                ids = [f"{doc_id}_chunk{start + i}" for i in range(len(batch))]
                 self.db_client_collection.add(
-                    embeddings=[embedding],
-                    documents=[chunk],
-                    ids=[chunk_id]
+                    embeddings=embeddings,
+                    documents=batch,
+                    ids=ids
                 )
             rag_logger.info(f"Document stored successfully: {document}")
         except Exception as e:
             rag_logger.error(f"Error storing documents: {str(e)}")
             raise Exception(f"Error storing documents: {str(e)}")
 
-    def search_documents(self, query: str, max_results: int):
+    def search_documents(self, query: str, max_results: int) -> dict:
         """Search documents in the database"""
         try:
-            embedding = self.generate_embedding(query)
+            embedding = self.generate_embedding([query])
             results = self.db_client_collection.query(
-                query_embeddings=[embedding],
+                query_embeddings=embedding,
                 n_results=max_results
             )
             return results
