@@ -1,9 +1,47 @@
 from fastmcp import Client
 from fastmcp.client.transports import StdioTransport, StreamableHttpTransport
+from utils.config import MCP_CONFIG_DIR_PATH
+from utils.load import mcp_tools_config
 from utils.logger import get_logger
+from utils.helpers import apply_config, create_dir
+from pathlib import Path
 
 mcp_logger = get_logger(__name__)
 
+def handle_mcp_config(mcp_tools: dict, action: str):
+    """Handle the MCP config"""
+    success = False
+    message = "Invalid action"
+    create_dir(MCP_CONFIG_DIR_PATH)
+
+    if mcp_tools is not None:
+        data = {"mcp_clients": mcp_tools}
+    else:
+        mcp_tools = []
+        data = {"mcp_clients": []}
+    
+    config_file_path = Path(MCP_CONFIG_DIR_PATH) / mcp_tools_config
+
+    if not config_file_path.exists():
+        action = "save"
+
+    if action in ["save", "load"]:
+        if action == "save":
+            success, current_config = apply_config(config_file_path, "r")
+            if not success:
+                current_config = {}
+
+            config = {
+                "mcp_clients": mcp_tools,
+            }
+
+            success, _ = apply_config(config_file_path, "w", config)
+            message = "MCP configuration saved successfully" if success else "Failed to save MCP configuration"
+        elif action == "load":
+            success, data = apply_config(config_file_path, "r")
+            message = "MCP configuration loaded successfully" if success else "Failed to load MCP configuration (check if the configuration file exists or apply for new configuration)"
+    return {"success": success, "message": message, "data": data}
+    
 class MCPClient:
     def __init__(self, server_path: str, transport_type: str):
         self.path = server_path

@@ -155,8 +155,9 @@ class LLMClient:
                         "summary": "auto"
                     }
             else:
-                if float(self.config.temperature) > 0:
-                    request_params["temperature"] = float(self.config.temperature)
+                temperature = float(self.config.temperature)
+                if 0.0 <= temperature <= 2.0:
+                    request_params["temperature"] = temperature
 
             response = self.client.responses.create(**request_params)
             return response
@@ -184,8 +185,9 @@ class LLMClient:
                     request_params["thinking"] = {"type": "adaptive"}
                     request_params["output_config"] = {"effort": self.config.reasoning_effort}
             else:
-                if float(self.config.temperature) > 0:
-                    request_params["temperature"] = float(self.config.temperature)
+                temperature = float(self.config.temperature)
+                if 0.0 <= temperature <= 2.0:
+                    request_params["temperature"] = temperature
 
             if int(self.config.max_tokens) > 0:
                 request_params["max_tokens"] = int(self.config.max_tokens)
@@ -224,8 +226,9 @@ class LLMClient:
             if int(self.config.max_tokens) > 0:
                 request_params["options"]["num_predict"] = int(self.config.max_tokens)
 
-            if float(self.config.temperature) > 0:
-                request_params["options"]["temperature"] = float(self.config.temperature)
+            temperature = float(self.config.temperature)
+            if 0.0 <= temperature <= 2.0:
+                request_params["options"]["temperature"] = temperature
 
             response = self.client.chat(**request_params)
             return response

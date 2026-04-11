@@ -4,16 +4,20 @@ import os
 # Load environment variables
 load_dotenv(find_dotenv())
 
+# App Configuration
+APP_CONFIG_DIR_PATH = os.getenv('APP_CONFIG_DIR_PATH') or './config'
+
 # LLM Configuration
 LLM_CONFIG_DIR_PATH = os.getenv('LLM_CONFIG_DIR_PATH') or './config'
-LLM_DEFAULT_PROVIDER = os.getenv('LLM_DEFAULT_PROVIDER') or 'gpt'
+LLM_DEFAULT_PROVIDER = os.getenv('LLM_DEFAULT_PROVIDER') or 'ollama'
 LLM_DEFAULT_EMBEDDING_PROVIDER = os.getenv('LLM_DEFAULT_EMBEDDING_PROVIDER') or 'ollama'
-LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL') or 'gpt-5-nano'
+LLM_DEFAULT_MODEL = os.getenv('LLM_DEFAULT_MODEL') or 'qwen3.5:9b'
 LLM_DEFAULT_EMBEDDING_MODEL = os.getenv('LLM_DEFAULT_EMBEDDING_MODEL') or 'mxbai-embed-large'
 LLM_SYSTEM_PROMPT = os.getenv('LLM_SYSTEM_PROMPT') or 'You are a helpful assistant.'
 LLM_DEFAULT_MAX_TOKENS = os.getenv('LLM_DEFAULT_MAX_TOKENS') or "1000"
-LLM_DEFAULT_TEMPERATURE = os.getenv('LLM_DEFAULT_TEMPERATURE') or "0.5"
-LLM_DEFAULT_OLLAMA_URL = os.getenv('LLM_DEFAULT_OLLAMA_URL') or 'http://ollama:11434'
+LLM_DEFAULT_TEMPERATURE = os.getenv('LLM_DEFAULT_TEMPERATURE') or "0.7"
+LLM_DEFAULT_REASONING_EFFORT = os.getenv('LLM_DEFAULT_REASONING_EFFORT') or "medium"
+LLM_DEFAULT_URL = os.getenv('LLM_DEFAULT_URL') or 'http://ollama:11434'
 LLM_OLLAMA_DIR_PATH = os.getenv('LLM_OLLAMA_DIR_PATH') or './ollama'
 
 # RAG Configuration
@@ -24,7 +28,11 @@ RAG_DEFAULT_DB_NAME = os.getenv('RAG_DEFAULT_DB_NAME') or 'work_db'
 RAG_DEFAULT_CHUNK_SIZE = os.getenv('RAG_DEFAULT_CHUNK_SIZE') or "200"
 RAG_DEFAULT_CHUNK_OVERLAP = os.getenv('RAG_DEFAULT_CHUNK_OVERLAP') or "150"
 RAG_DEFAULT_MAX_NB_RESULTS = os.getenv('RAG_DEFAULT_MAX_NB_RESULTS') or "10"
+RAG_DEFAULT_BATCH_SIZE = os.getenv('RAG_DEFAULT_BATCH_SIZE') or "512"
 RAG_MARKDOWN = os.getenv('RAG_MARKDOWN') or 'true'
+
+# MCP Configuration
+MCP_CONFIG_DIR_PATH = os.getenv('MCP_CONFIG_DIR_PATH') or './config'
 
 # Frontend Configuration
 GRADIO_BIND_ADDRESS = os.getenv('GRADIO_BIND_ADDRESS') or '127.0.0.1'
@@ -43,3 +51,8 @@ DATA_FOLDER_PATH = os.getenv('DATA_FOLDER_PATH') or './data'
 LOG_DIR_PATH = os.getenv('LOG_DIR_PATH') or './logs'
 LOG_LEVEL = os.getenv('LOG_LEVEL') or 'INFO'
 LOG_FILENAME = os.getenv('LOG_FILENAME') or 'app.log'
+
+# Reasoning Configuration
+OLLAMA_PREFIX_MODELS=os.getenv('OLLAMA_PREFIX_MODELS')
+OPENAI_PREFIX_MODELS=os.getenv('OPENAI_PREFIX_MODELS')
+CLAUDE_PREFIX_MODELS=os.getenv('CLAUDE_PREFIX_MODELS')

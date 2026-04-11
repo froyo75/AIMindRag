@@ -7,6 +7,7 @@ import json
 import asyncio
 import re
 from utils.logger import get_logger
+import time
 
 _STREAM_END = object()
 
@@ -25,6 +26,23 @@ THINK_OPEN = '<think>'
 THINK_CLOSE = '</think>'
 RAG_CONTEXT_MSG = "Answer the question based on the context.\n\nContext:\n{context}\n\nQuestion:\n{query}"
 
+def _format_token_metrics(text: str, total_input_tokens: int, total_output_tokens: int, duration: float, usage_known: bool):
+    """Format the token metrics"""
+    words = len(text.split())
+    tokens = words * 1.33  # in most LLM tokenizers
+    total_time = duration
+    if usage_known:
+        estimated_total_tokens = total_input_tokens + total_output_tokens
+    else:
+        estimated_total_tokens = tokens
+
+    if total_time > 0:
+        token_per_second = estimated_total_tokens / total_time
+    else:
+        token_per_second = 0.0
+    token_metrics = f"**{total_time:.2f}**s · **~{estimated_total_tokens:.0f}** tokens · **~{token_per_second:.2f}** tok/s"
+    return token_metrics
+
 def _content_as_query_string(content) -> str:
     """Last user message content for RAG may be str or GPT structured list."""
     if content is None:
@@ -36,7 +54,6 @@ def _content_as_query_string(content) -> str:
         if isinstance(first, dict) and first.get("text"):
             return first["text"]
     return str(content)
-
 
 def _normalize_system_prompt(llm_provider: str) -> dict:
     """Normalize the system prompt"""
@@ -174,11 +191,12 @@ async def handle_tools_call(llm_provider: str, tool_calls: list, mcp_clients: di
         tool_outputs.append(_normalize_tool_outputs(tool_id, content, llm_provider))
     return tool_outputs
 
-async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool):
+async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool) -> tuple[str, str]:
     """Handle the stream responses"""
     tools = get_available_tools(mcp_clients)
     normalized_tools = _normalize_tools(tools, llm_provider)
     tools_to_use = normalized_tools if use_tools and len(normalized_tools) > 0 else None
+    start_time = time.time()
 
     while True:
         stream_content = ""
@@ -190,6 +208,9 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
         current_tool_name = None
         current_tool_input = None
         normalized_tool_outputs = []
+        total_input_tokens = 0
+        total_output_tokens = 0
+        usage_known = False
         llm_client = LLMClient(llm_provider, llm_use_thinking)
 
         if use_rag:
@@ -205,11 +226,13 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
 
         stream_response = llm_client.generate_response(messages, tools=tools_to_use)
         last_display = ""
+        last_token_metrics = None
+
         async for chunk in _chunks_async(stream_response):
             call_tool = False
             content = None
             finish_reason = None
-            
+
             if llm_provider == "gpt":
                 if chunk.type.startswith("response."):
                     if chunk.type == "response.output_text.delta":
@@ -226,6 +249,11 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                     elif chunk.type == "response.reasoning_summary_text.delta":
                         stream_reasoning += chunk.delta
                     elif chunk.type == "response.completed":
+                        usage = getattr(chunk.response, "usage", None)
+                        if usage is not None:
+                            total_input_tokens = usage.input_tokens
+                            total_output_tokens = usage.output_tokens
+                            usage_known = True
                         finish_reason = "tool_calls" if tool_calls else "stop"
                     elif chunk.type == "response.failed":
                         finish_reason = "failed"
@@ -264,6 +292,11 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                         })
                         del tool_calls_map[chunk.index]
                 elif chunk.type == "message_delta":
+                    usage = getattr(chunk, "usage", None)
+                    if usage is not None:
+                        total_input_tokens = usage.input_tokens
+                        total_output_tokens = usage.output_tokens
+                        usage_known = True
                     finish_reason = chunk.delta.stop_reason
                     if finish_reason == "tool_use":
                         finish_reason = "tool_calls"
@@ -297,6 +330,12 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                             }
                         )
                 elif chunk.done:
+                    prompt_eval_count = getattr(chunk, "prompt_eval_count", None)
+                    eval_count = getattr(chunk, "eval_count", None)
+                    if prompt_eval_count is not None and eval_count is not None:
+                        total_input_tokens = prompt_eval_count
+                        total_output_tokens = eval_count
+                        usage_known = True
                     finish_reason = "tool_calls" if tool_calls else "stop"
                 elif chunk.done_reason == "error":
                     chat_logger.error(f"Ollama stream error")
@@ -309,12 +348,23 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
             if content is not None and content != "":
                 stream_content += content or ""
 
+            """If the display or the metrics have changed, yield the display and the metrics"""
             display = _format_thinking_display(
                 stream_reasoning, stream_content, llm_use_thinking
             )
+            token_metrics = _format_token_metrics(display, total_input_tokens, total_output_tokens, time.time() - start_time, usage_known)
+            display_changed = False
             if display and display != last_display:
-                last_display = display
-                yield display
+                display_changed = True
+            metrics_changed = False
+            if token_metrics != last_token_metrics:
+                metrics_changed = True
+            if display_changed or metrics_changed:
+                yield display, token_metrics
+                if display_changed:
+                    last_display = display
+                if metrics_changed:
+                    last_token_metrics = token_metrics
 
             if finish_reason == "tool_calls" or call_tool:
                 normalized_tool_outputs = await handle_tools_call(llm_provider, tool_calls, mcp_clients)
@@ -337,7 +387,7 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                 chat_logger.error(f"LLM API error (finish reason: {finish_reason})!")
                 raise Exception(f"LLM API error (finish reason: {finish_reason})!")
         
-async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool):
+async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool) -> tuple[str, str]:
     """Handle the chat"""
     try:
         messages = []
@@ -352,10 +402,10 @@ async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict
 
         messages.append({"role": "user", "content": message})
 
-        async for response in handle_stream_responses(llm_provider, messages, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking):
-            yield response
+        async for response, token_metrics in handle_stream_responses(llm_provider, messages, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking):
+            yield response, token_metrics
 
     except Exception as e:
         chat_logger.error(f"Error in chat: {str(e)}")
         error_msg = f"Sorry, I encountered an error: {str(e)}"
-        yield error_msg
+        yield error_msg, "—"

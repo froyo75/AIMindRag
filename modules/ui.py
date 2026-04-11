@@ -3,9 +3,9 @@ import gradio as gr
 from utils.helpers import str_to_bool, delete_dir, create_dir
 from utils.config import GRADIO_DEBUG, GRADIO_BIND_ADDRESS, GRADIO_PORT, GRADIO_TEMP_FOLDER_PATH, GRADIO_SHARE, GRADIO_PWA, GRADIO_ANALYTICS_ENABLED, RAG_DB_PATH, RAG_MARKDOWN, RAG_DEFAULT_DB_NAME, \
     LLM_DEFAULT_PROVIDER, LLM_DEFAULT_MODEL, LLM_DEFAULT_URL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DEFAULT_EMBEDDING_MODEL, RAG_DEFAULT_MAX_NB_RESULTS, LLM_DEFAULT_REASONING_EFFORT
-from utils.load import available_llm_providers, available_rag_providers
+from utils.load import available_llm_providers, available_rag_providers, handle_app_config
 from modules.chat import chat
-from modules.mcp import MCPClient
+from modules.mcp import MCPClient, handle_mcp_config
 from modules.llm import LLMClient
 from modules.rag import RAGClient, get_vector_store_list
 from modules.llm import handle_llm_config
@@ -20,7 +20,7 @@ os.environ['GRADIO_TEMP_DIR'] = GRADIO_TEMP_FOLDER_PATH
 os.environ['GRADIO_DEBUG'] = GRADIO_DEBUG
 os.environ['GRADIO_ANALYTICS_ENABLED'] = GRADIO_ANALYTICS_ENABLED
 
-# CSS for centering the checkbox
+# CSS for centering the checkbox, reverse the layout and the token metrics
 css = """
 .center-checkbox .block {
     min-height: unset !important;
@@ -34,6 +34,20 @@ css = """
     padding-top: 24px !important;
 }
 
+.chat-with-metrics-below {
+    display: flex;
+    flex-direction: column-reverse;
+    gap: 0.75rem;
+}
+
+.token-metrics-centered {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    align-self: stretch;
+    text-align: right;
+}
+
 .main-layout-row {
     flex-direction: row-reverse !important;
 }
@@ -41,7 +55,7 @@ css = """
 
 def run_ui():
     """Run the Gradio UI"""
-    with gr.Blocks(title="MCP Client", css=css) as ui:
+    with gr.Blocks(title="MCP Client") as ui:
         loaded_llm_model = gr.State("")
         loaded_embedding_model = gr.State("")
         selected_mcp_client = gr.State("")
@@ -52,10 +66,10 @@ def run_ui():
         mcp_tools = gr.State({})
         available_llm_models = gr.State({})
         available_embedding_models = gr.State({})
-        settings_sidebar_hidden = gr.State(False)
+        settings_sidebar_hidden = gr.State(True)
 
         with gr.Row(elem_classes=["main-layout-row"]):
-            with gr.Column(scale=2, min_width=400, visible=True) as settings_column:
+            with gr.Column(scale=2, min_width=400, visible=False) as settings_column:
                 # LLM Configuration Block
                 with gr.Group():
                     gr.Markdown("##  LLM Configuration")
@@ -112,7 +126,7 @@ def run_ui():
 
                     use_tools = gr.Checkbox(
                         label="Use MCP Tools",
-                        value=True,
+                        value=False,
                         interactive=True,
                     )
                     
@@ -275,16 +289,18 @@ def run_ui():
                         )
             
             # Right column for chat interface
-            with gr.Column(scale=3):
-                toggle_settings_btn = gr.Button(
-                    "Hide settings panel",
-                    size="sm",
-                    variant="secondary",
+            with gr.Column(scale=3, elem_classes=["chat-with-metrics-below"]):
+                stream_metrics = gr.Markdown(
+                    value="**0.00**s · **0** tokens · **0** tok/s",
+                    label="Token metrics",
+                    show_label=False,
+                    elem_classes=["token-metrics-centered"],
                 )
                 gr.ChatInterface(
                     fn=chat,
                     title="🤖 AIMindRag Assistant",
                     additional_inputs=[llm_provider, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking],
+                    additional_outputs=[stream_metrics],
                     analytics_enabled=str_to_bool(GRADIO_ANALYTICS_ENABLED),
                     save_history=True,
                     api_visibility="private",
@@ -297,18 +313,25 @@ def run_ui():
                         allow_tags=["think"],
                     )
                 )
+                toggle_settings_btn = gr.Button(
+                    "Show settings panel",
+                    size="sm",
+                    variant="secondary",
+                )
 
-        def init_ui(llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url):
+        async def init_ui(mcp_clients, mcp_tools, llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url):
             """Initialize the UI"""
             clean_caches()
+            llm_provider, embedding_provider, use_tools, use_rag = handle_app_config_load()
+            mcp_clients, mcp_tools, clients_table, tools_table = await handle_mcp_load(mcp_clients, mcp_tools, use_tools)
             vector_db_names = get_vector_store_list()
             available_llm_models, available_embedding_models = get_available_llm_models()
             llm_model, gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_llm_reasoning_effort, gr_llm_base_url = handle_llm_load_config(
-                llm_provider, None, available_llm_models, llm_reasoning_effort, llm_base_url)
+                llm_provider, None, available_llm_models, llm_reasoning_effort, llm_base_url, notify=False)
             embedding_model, gr_embedding_provider, gr_embedding_model, gr_chunk_size, gr_chunk_overlap, gr_batch_size, gr_embedding_api_key, vector_store_info, gr_embedding_base_url = handle_rag_load_config(
-                embedding_provider, None, None, None, None, None, available_embedding_models, embedding_base_url)
+                embedding_provider, None, None, None, None, None, available_embedding_models, embedding_base_url, notify=False)
             gr_embedding_models = update_embedding_models_list(embedding_provider, embedding_model, available_embedding_models)
-            return gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_llm_reasoning_effort, gr_llm_base_url, gr_embedding_provider, gr_embedding_models, gr_chunk_size, gr_chunk_overlap, gr_batch_size, \
+            return use_tools, use_rag, mcp_clients, mcp_tools, clients_table, tools_table, gr_llm_provider, gr_llm_models, gr_llm_api_key, gr_llm_reasoning_effort, gr_llm_base_url, gr_embedding_provider, gr_embedding_models, gr_chunk_size, gr_chunk_overlap, gr_batch_size, \
                 gr_embedding_api_key, gr_embedding_base_url, update_vector_db_names(vector_db_names), vector_store_info, available_llm_models, available_embedding_models
 
         def get_available_llm_models():
@@ -318,13 +341,17 @@ def run_ui():
             for llm_provider in available_llm_providers:
                 try:
                     llm_models = LLMClient(llm_provider).get_available_models() or []
-                    embedding_models = [model for model in llm_models if "embed" in model.lower()]
                     llm_models_without_embedding = [model for model in llm_models if "embed" not in model.lower()]
+
+                    if llm_provider in available_rag_providers:
+                        embedding_models = [m for m in llm_models if "embed" in m.lower()]
+                        if not embedding_models:
+                            gr.Warning(f"No embedding models found for provider: {llm_provider}")
+                    else:
+                        embedding_models = []
 
                     if not llm_models:
                         gr.Warning(f"No LLM models found for provider: {llm_provider}")
-                    if not embedding_models:
-                        gr.Warning(f"No Embedding models found for provider: {llm_provider}")
 
                     available_llm_models[llm_provider] = llm_models_without_embedding
                     available_embedding_models[llm_provider] = embedding_models
@@ -347,7 +374,6 @@ def run_ui():
                 return gr.update(visible=False)
             else:
                 return gr.update(visible=True)
-                
 
         def update_llm_models_list(llm_provider: str, llm_model: str, available_llm_models: dict):
             """Update the LLM models list"""
@@ -401,7 +427,57 @@ def run_ui():
                         tool_name = tool["function"]["name"] or "No name"
                         tool_description = tool["function"]["description"] or "No description"
                         rows.append([tool_name, tool_description])
-            return rows      
+            return rows
+
+        def handle_app_config_load():
+            """Handle the app config load"""
+            llm_provider = LLM_DEFAULT_PROVIDER
+            embedding_provider = LLM_DEFAULT_EMBEDDING_PROVIDER
+            use_tools = False
+            use_rag = False
+            loaded_config = handle_app_config(llm_provider, embedding_provider, use_tools, use_rag, "load")
+            if not loaded_config["success"]:
+                gr.Warning(loaded_config["message"])
+            else:
+                llm_provider = loaded_config["data"]["llm_provider"]
+                embedding_provider = loaded_config["data"]["embedding_provider"]
+                use_tools = loaded_config["data"]["use_tools"]
+                use_rag = loaded_config["data"]["use_rag"]
+                gr.Info(loaded_config["message"])
+            return llm_provider, embedding_provider, use_tools, use_rag
+
+        def handle_app_config_save(llm_provider: str, embedding_provider: str, use_tools: bool, use_rag: bool):
+            """Handle the app config save"""
+            saved_config = handle_app_config(llm_provider, embedding_provider, use_tools, use_rag, "save")
+            if not saved_config["success"]:
+                gr.Warning(saved_config["message"])
+            return llm_provider, embedding_provider, use_tools, use_rag
+
+        def handle_mcp_save_config(mcp_clients: dict) -> None:
+            """Handle the MCP save config"""
+            rows = []
+            for url, info in mcp_clients.items():
+                client = info.get("mcp_client")
+                transport = getattr(client, "transport_type", None) or "http"
+                rows.append({"url": url, "type": transport})
+            result = handle_mcp_config(rows, "save")
+            if not result["success"]:
+                gr.Warning(result["message"])
+
+        async def handle_mcp_load(mcp_clients: dict, mcp_tools: dict, use_tools: bool):
+            """Handle the MCP load on startup"""
+            if not use_tools:
+                return mcp_clients, mcp_tools, update_clients_table(mcp_clients), update_tools_table(mcp_tools)
+            else:
+                loaded_config = handle_mcp_config(None, "load")
+                if not loaded_config["success"]:
+                    gr.Warning(loaded_config["message"])
+                else:
+                    mcp_clients_list = loaded_config["data"]["mcp_clients"]
+                    for mcp_client in mcp_clients_list:
+                        await handle_connect(mcp_client["url"], mcp_client["type"], mcp_clients, mcp_tools)
+                gr.Info(loaded_config["message"])
+            return mcp_clients, mcp_tools, update_clients_table(mcp_clients), update_tools_table(mcp_tools)
         
         async def handle_connect(client_path: str, transport_type: str, mcp_clients: dict, mcp_tools: dict):
             """Handle the MCP connect"""
@@ -417,7 +493,8 @@ def run_ui():
                 mcp_clients.update({client_path: {"mcp_client": client, "status": "Connected"}})
                 discovered_tools = await client.get_tools() or []
                 mcp_tools.update({client_path: {"tools": discovered_tools}})
-                gr.Info("Connected to MCP server")
+                gr.Info(f"Connected to MCP server: {client_path}")
+                handle_mcp_save_config(mcp_clients)
             return mcp_clients, mcp_tools, update_clients_table(mcp_clients), update_tools_table(mcp_tools)
         
         async def handle_disconnect(selected_client_name: str, mcp_clients: dict, mcp_tools: dict):
@@ -430,7 +507,8 @@ def run_ui():
                     await client.disconnect()
                     del mcp_clients[selected_client_name]
                     del mcp_tools[selected_client_name]
-                    gr.Info("Disconnected from MCP server")
+                    gr.Info(f"Disconnected from MCP server: {selected_client_name}")
+                    handle_mcp_save_config(mcp_clients)
                 else:
                     raise gr.Error("Client not found", print_exception=False)
             return update_clients_table(mcp_clients), update_tools_table(mcp_tools), None
@@ -448,9 +526,10 @@ def run_ui():
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
+                handle_app_config_save(llm_provider, None, None, None)
             return llm_provider, gr.update(value=llm_model)
         
-        def handle_llm_load_config(llm_provider: str, llm_model: str, available_llm_models: dict, llm_reasoning_effort: str, llm_base_url: str):
+        def handle_llm_load_config(llm_provider: str, llm_model: str, available_llm_models: dict, llm_reasoning_effort: str, llm_base_url: str, *, notify: bool = True):
             """Handle the LLM load config"""
             reasoning_effort = llm_reasoning_effort
             base_url = llm_base_url
@@ -462,7 +541,8 @@ def run_ui():
                 llm_model = loaded_config["data"]["model"]
                 reasoning_effort = loaded_config["data"]["reasoning_effort"]
                 base_url = loaded_config["data"]["base_url"]
-                gr.Info(loaded_config["message"])
+                if notify:
+                    gr.Info(loaded_config["message"])
             gr_llm_model = update_llm_models_list(llm_provider, llm_model, available_llm_models)
             return (
                 llm_model,
@@ -505,9 +585,10 @@ def run_ui():
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
+                handle_app_config_save(None, embedding_provider, None, None)
             return embedding_provider, gr.update(value=embedding_model), gr.update(value=chunk_size), gr.update(value=chunk_overlap), gr.update(value=int(batch_size)), toggle_api_key(embedding_provider), toggle_base_url(embedding_provider), vector_store_info
         
-        def handle_rag_load_config(embedding_provider: str, embedding_model: str, vector_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, available_embedding_models: dict, embedding_base_url: str):
+        def handle_rag_load_config(embedding_provider: str, embedding_model: str, vector_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, available_embedding_models: dict, embedding_base_url: str, *, notify: bool = True):
             """Handle the RAG load config"""
             base_url = embedding_base_url
             loaded_config = handle_rag_config(embedding_provider, None, None, None, None, None, None, "load", embedding_base_url)
@@ -521,7 +602,8 @@ def run_ui():
                 chunk_overlap = loaded_config["data"]["chunk_overlap"]
                 batch_size = int(loaded_config["data"]["batch_size"])
                 base_url = loaded_config["data"]["base_url"]
-                gr.Info(loaded_config["message"])
+                if notify:
+                    gr.Info(loaded_config["message"])
             gr_embedding_model = update_embedding_models_list(embedding_provider, embedding_model, available_embedding_models)
             return embedding_model, gr.update(value=embedding_provider), gr_embedding_model, gr.update(value=chunk_size), gr.update(value=chunk_overlap), gr.update(value=batch_size), toggle_api_key(embedding_provider), vector_store_info, gr.update(value=base_url, visible=(embedding_provider == "ollama"))
 
@@ -642,16 +724,31 @@ def run_ui():
             api_visibility="private",
         )
 
+        use_tools.change(
+            fn=handle_app_config_save, 
+            inputs=[llm_provider, embedding_provider, use_tools, use_rag], 
+            outputs=[llm_provider, embedding_provider, use_tools, use_rag],
+            api_visibility="private"
+        )
+
+        use_rag.change(
+            fn=handle_app_config_save, 
+            inputs=[llm_provider, embedding_provider, use_tools, use_rag], 
+            outputs=[llm_provider, embedding_provider, use_tools, use_rag],
+            api_visibility="private"
+        )
+
         ui.load(
             fn=init_ui,
-            inputs=[llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url],
-            outputs=[llm_provider, llm_model, llm_api_key, llm_reasoning_effort, llm_base_url, embedding_provider, embedding_model, chunk_size, chunk_overlap, batch_size, embedding_api_key, embedding_base_url, list_vector_db_names, vector_store_info, available_llm_models, available_embedding_models],
+            inputs=[mcp_clients, mcp_tools, llm_provider, embedding_provider, llm_reasoning_effort, llm_base_url, embedding_base_url],
+            outputs=[use_tools, use_rag, mcp_clients, mcp_tools, clients_table, tools_table, llm_provider, llm_model, llm_api_key, llm_reasoning_effort, llm_base_url, embedding_provider, embedding_model, chunk_size, chunk_overlap, batch_size, embedding_api_key, embedding_base_url, list_vector_db_names, vector_store_info, available_llm_models, available_embedding_models],
             api_visibility="private"
         )
 
     try:
         ui.queue()
         ui.launch(
+            css=css,
             server_name=GRADIO_BIND_ADDRESS,
             server_port=int(GRADIO_PORT),
             share=str_to_bool(GRADIO_SHARE),
