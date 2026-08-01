@@ -1,9 +1,11 @@
 gradio
 openai
 anthropic
+voyageai
 ollama
 python-dotenv
 fastmcp
+mcp_types
 httpx
 chromadb
 langchain

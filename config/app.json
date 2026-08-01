@@ -1,1 +1,1 @@
-{"llm_provider": "ollama", "embedding_provider": "ollama", "use_tools": false, "use_rag": false}
+{"llm_provider": "openai_compat", "embedding_provider": "openai_compat", "use_tools": false, "use_rag": true, "use_piillmshield": false}

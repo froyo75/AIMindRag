@@ -2,6 +2,7 @@ from utils.config import LLM_DEFAULT_URL, LLM_DEFAULT_EMBEDDING_PROVIDER, LLM_DE
     RAG_DEFAULT_BATCH_SIZE, RAG_DEFAULT_CHUNK_SIZE, RAG_DEFAULT_CHUNK_OVERLAP
 from utils.load import available_rag_config_providers
 from utils.helpers import apply_config, create_dir, delete_dir, safe_path, delete_file, list_dirs
+import voyageai
 from openai import OpenAI
 from ollama import Client
 from dataclasses import dataclass
@@ -42,10 +43,9 @@ def handle_rag_config(provider: str, embedding_model: str, api_key: str, db_name
             if not success:
                 current_config = {}
 
-            if provider == "ollama":
-                url = base_url or current_config.get("base_url") or LLM_DEFAULT_URL
-            else:
-                url = ""
+            url = base_url or current_config.get("base_url")
+            if not url and provider in ("ollama", "openai_compat"):
+                url = LLM_DEFAULT_URL
 
             config = {
                 "db_name": db_name or current_config.get("db_name") or RAG_DEFAULT_DB_NAME,
@@ -137,7 +137,9 @@ class RAGClient:
         
         provider_init_methods = {
             "gpt": self._init_openai,
-            "ollama": self._init_ollama
+            "claude": self._init_claude,
+            "ollama": self._init_ollama,
+            "openai_compat": self._init_openai_compat
         }
         
         init_method = provider_init_methods.get(self.config.provider)
@@ -150,12 +152,21 @@ class RAGClient:
     def _init_openai(self):
         """Initialize OpenAI client"""
         return OpenAI(api_key=self.config.api_key)
+
+    def _init_claude(self):
+        """Initialize Claude client"""          
+        return voyageai.Client(api_key=self.config.api_key)
     
     def _init_ollama(self):
         """Initialize Ollama client"""
         url = self.config.base_url or LLM_DEFAULT_URL
         client = Client(host=url)
         return client
+
+    def _init_openai_compat(self):
+        """Initialize OpenAI-compatible client (OpenRouter, vLLM, etc.)"""
+        api_key = self.config.api_key or "EMPTY"
+        return OpenAI(api_key=api_key, base_url=self.config.base_url or LLM_DEFAULT_URL)
 
     def _init_vector_db(self):
         """Initialize Chroma client and collection"""
@@ -170,12 +181,16 @@ class RAGClient:
         """Generate embedding based on the LLM type"""
         if self.config.provider == "gpt":
             return self._get_openai_embedding(texts)
+        if self.config.provider == "claude":
+            return self._get_claude_embedding(texts)
         elif self.config.provider == "ollama":
             return self._get_ollama_embedding(texts)
+        elif self.config.provider == "openai_compat":
+            return self._get_openai_compat_embedding(texts)
         else:
             rag_logger.error(f"Unsupported provider: {self.provider}")
             raise ValueError(f"Unsupported provider: {self.provider}")
-    
+
     def _get_openai_embedding(self, texts: list) -> list:
         """Generate embedding using OpenAI API"""
         try:
@@ -186,12 +201,49 @@ class RAGClient:
             }
             
             response = self.embedding_client.embeddings.create(**request_params)    
-            embeddings = [d.embedding for d in response.data]
+            embeddings = [item.embedding for item in response.data]
             return embeddings
 
         except Exception as e:
             rag_logger.error(f"Error generating OpenAI response: {str(e)}")
             raise Exception(f"Error generating OpenAI response: {str(e)}")
+
+    def _get_openai_compat_embedding(self, texts: list) -> list:
+        """Generate embedding using OpenAI compatible API"""
+        try:
+            request_params = {
+                "model": self.config.embedding_model,
+                "input": texts,
+            }
+
+            # Optional: if supported
+            if getattr(self.config, "encoding_format", None):
+                request_params["encoding_format"] = self.config.encoding_format
+
+            response = self.embedding_client.embeddings.create(**request_params)
+            embeddings = [item.embedding for item in response.data]
+            return embeddings
+
+        except Exception as e:
+            rag_logger.error(f"Error generating embedding: {e}")
+            raise Exception(f"Error generating embedding: {e}")
+
+    def _get_claude_embedding(self, texts: list) -> list:
+        """Generate embedding using Voyage AI"""
+        try:
+            request_params = {
+                "model": self.config.embedding_model,
+                "texts": texts,
+                "input_type": "document",
+            }
+
+            response = self.embedding_client.embed(**request_params)
+            embeddings = response.embeddings
+            return embeddings
+
+        except Exception as e:
+            rag_logger.error(f"Error generating Voyage embedding: {str(e)}")
+            raise Exception(f"Error generating Voyage embedding: {str(e)}")
     
     def _get_ollama_embedding(self, texts: list) -> list:
         """Generate embedding using Ollama API"""

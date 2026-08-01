@@ -1,0 +1,1 @@
+{"model": "z-ai/glm-5.2", "api_key": "", "provider": "openai_compat", "max_tokens": "4096", "temperature": "0.7", "reasoning_effort": "medium", "base_url": "https://openrouter.ai/api/v1"}

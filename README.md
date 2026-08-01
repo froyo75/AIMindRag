@@ -15,6 +15,7 @@
 - Local RAG system using [ChromaDB](https://github.com/chroma-core/chroma)
 - Simple usage with with a friendly web interface using Gradio
 - Support office documents and more (`.txt, .pdf, .md, .json, .xml, outlook.msg, .zip`)
+- Support [PIILLMShield](https://github.com/froyo75/PIILLMShield) LLM proxy !
 
 ### ⏳ Installation
 

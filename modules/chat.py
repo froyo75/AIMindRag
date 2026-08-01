@@ -1,7 +1,7 @@
 from modules.llm import LLMClient
 from modules.rag import RAGClient
 from utils.config import LLM_SYSTEM_PROMPT
-from fastmcp.prompts.prompt import TextContent
+from mcp_types import TextContent
 import uuid
 import json
 import asyncio
@@ -74,7 +74,7 @@ def _normalize_chat_message(msg: dict, llm_provider: str) -> dict:
         content = normalized_msg["content"][0]["text"]
         content_type = "output_text" if role == "assistant" else "input_text"
         normalized_msg["content"] = [{"type": content_type, "text": content}]
-    elif llm_provider == "ollama":
+    elif llm_provider in ("ollama", "openai_compat"):
         role = normalized_msg["role"]
         content = normalized_msg["content"]
         normalized_msg["content"] = "".join(part["text"] for part in content if part["type"] == "text")
@@ -191,7 +191,8 @@ async def handle_tools_call(llm_provider: str, tool_calls: list, mcp_clients: di
         tool_outputs.append(_normalize_tool_outputs(tool_id, content, llm_provider))
     return tool_outputs
 
-async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool) -> tuple[str, str]:
+async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients: dict, use_tools: bool, use_rag: bool, 
+        embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool, use_piillmshield: bool, piillmshield_url: str):
     """Handle the stream responses"""
     tools = get_available_tools(mcp_clients)
     normalized_tools = _normalize_tools(tools, llm_provider)
@@ -203,15 +204,12 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
         stream_reasoning = ""
         tool_calls = []
         tool_calls_map = {}
-        tool_outputs = []
-        current_tool_id = None
-        current_tool_name = None
-        current_tool_input = None
         normalized_tool_outputs = []
         total_input_tokens = 0
         total_output_tokens = 0
         usage_known = False
-        llm_client = LLMClient(llm_provider, llm_use_thinking)
+        override = piillmshield_url if use_piillmshield else None
+        llm_client = LLMClient(llm_provider, llm_use_thinking, base_url_override=override)
 
         if use_rag:
             query = _content_as_query_string(messages[-1].get("content"))
@@ -309,6 +307,43 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                 elif chunk.type == "error":
                     chat_logger.error(f"Claude stream error: {chunk.error}")
                     raise Exception(str(chunk.error))
+            elif llm_provider == "openai_compat":
+                usage = getattr(chunk, "usage", None)
+                if usage is not None:
+                    total_input_tokens = usage.prompt_tokens
+                    total_output_tokens = usage.completion_tokens
+                    usage_known = True
+                if chunk.choices:
+                    delta = chunk.choices[0].delta
+                    reasoning = getattr(delta, "reasoning", None) or getattr(delta, "reasoning_content", None)
+                    if reasoning:
+                        stream_reasoning += reasoning
+                    elif delta.content:
+                        content = delta.content
+                    elif delta.tool_calls:
+                        for tool_call in delta.tool_calls:
+                            index = tool_call.index
+                            if index not in tool_calls_map:
+                                tool_call_id = tool_call.id or str(uuid.uuid4())
+                                tool_calls_map[index] = {"id": tool_call_id, "name": "", "arguments": ""}
+                            if tool_call.id:
+                                tool_calls_map[index]["id"] = tool_call.id
+                            if tool_call.function.name:
+                                tool_calls_map[index]["name"] = tool_call.function.name
+                            if tool_call.function.arguments:
+                                tool_calls_map[index]["arguments"] += tool_call.function.arguments
+                    if chunk.choices[0].finish_reason:
+                        if chunk.choices[0].finish_reason == "tool_calls" or tool_calls_map:
+                            for index in sorted(tool_calls_map):
+                                tool_call = tool_calls_map[index]
+                                tool_calls.append({
+                                    "id": tool_call["id"],
+                                    "type": "function",
+                                    "function": {"name": tool_call["name"], "arguments": tool_call["arguments"]}
+                                })
+                            finish_reason = "tool_calls"
+                        else:
+                            finish_reason = "stop"
             else:
                 if chunk.message.thinking:
                     stream_reasoning += chunk.message.thinking
@@ -387,7 +422,9 @@ async def handle_stream_responses(llm_provider: str, messages: list, mcp_clients
                 chat_logger.error(f"LLM API error (finish reason: {finish_reason})!")
                 raise Exception(f"LLM API error (finish reason: {finish_reason})!")
         
-async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict, use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, llm_use_thinking: bool) -> tuple[str, str]:
+async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict, 
+               use_tools: bool, use_rag: bool, embedding_provider: str, rag_max_nb_results: int, 
+               llm_use_thinking: bool, use_piillmshield: bool, piillmshield_url: str):
     """Handle the chat"""
     try:
         messages = []
@@ -402,7 +439,9 @@ async def chat(message: str, history: list, llm_provider: str, mcp_clients: dict
 
         messages.append({"role": "user", "content": message})
 
-        async for response, token_metrics in handle_stream_responses(llm_provider, messages, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking):
+        async for response, token_metrics in handle_stream_responses(
+            llm_provider, messages, mcp_clients, use_tools, use_rag, embedding_provider, rag_max_nb_results, llm_use_thinking,
+            use_piillmshield, piillmshield_url):
             yield response, token_metrics
 
     except Exception as e:

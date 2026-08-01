@@ -1,0 +1,1 @@
+{"db_name": "work_db", "embedding_model": "voyage-4-lite", "api_key": "", "provider": "claude", "chunk_size": 200, "chunk_overlap": 200, "batch_size": 2048, "base_url": ""}
