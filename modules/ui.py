@@ -480,20 +480,14 @@ def run_ui():
                 gr.Info(loaded_config["message"])
             return llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield
 
-        def handle_app_config_save(
-                llm_provider: str, 
-                embedding_provider: str, 
-                use_tools: bool, 
-                use_rag: bool, 
-                use_piillmshield: bool,
-                ui_initialized: bool = False):
+        def handle_app_config_save(use_tools: bool, use_rag: bool, use_piillmshield: bool, ui_initialized: bool = False):
             """Handle the app config save"""
             if not ui_initialized:
-                return llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield
-            saved_config = handle_app_config(llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield, "save")
+                return use_tools, use_rag, use_piillmshield
+            saved_config = handle_app_config(None, None, use_tools, use_rag, use_piillmshield, "save")
             if not saved_config["success"]:
                 gr.Warning(saved_config["message"])
-            return llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield
+            return use_tools, use_rag, use_piillmshield
 
         def handle_mcp_save_config(mcp_clients: dict) -> None:
             """Handle the MCP save config"""
@@ -587,7 +581,7 @@ def run_ui():
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
-                handle_app_config_save(llm_provider, None, None, None, None, ui_initialized=True)
+                handle_app_config(llm_provider, None, None, None, None, "save")
             return llm_provider, gr.update(value=llm_model)
         
         def handle_llm_load_config(llm_provider: str, llm_model: str, available_llm_models: dict, llm_reasoning_effort: str, llm_base_url: str, *, notify: bool = True):
@@ -648,7 +642,7 @@ def run_ui():
                 gr.Warning(saved_config["message"])
             else:
                 gr.Info(saved_config["message"])
-                handle_app_config_save(None, embedding_provider, None, None, None, ui_initialized=True)
+                handle_app_config(None, embedding_provider, None, None, None, "save")
             return embedding_provider, gr.update(value=embedding_model), gr.update(value=chunk_size), gr.update(value=chunk_overlap), gr.update(value=int(batch_size)), toggle_api_key(embedding_provider), toggle_base_url(embedding_provider), vector_store_info
         
         def handle_rag_load_config(embedding_provider: str, embedding_model: str, vector_name: str, chunk_size: int, chunk_overlap: int, batch_size: int, available_embedding_models: dict, embedding_base_url: str, *, notify: bool = True):
@@ -793,15 +787,15 @@ def run_ui():
 
         use_tools.change(
             fn=handle_app_config_save, 
-            inputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield, ui_initialized], 
-            outputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield],
+            inputs=[use_tools, use_rag, use_piillmshield, ui_initialized], 
+            outputs=[use_tools, use_rag, use_piillmshield],
             api_visibility="private"
         )
 
         use_rag.change(
             fn=handle_app_config_save, 
-            inputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield, ui_initialized], 
-            outputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield],
+            inputs=[use_tools, use_rag, use_piillmshield, ui_initialized], 
+            outputs=[use_tools, use_rag, use_piillmshield],
             api_visibility="private"
         )
 
@@ -814,8 +808,8 @@ def run_ui():
 
         use_piillmshield.change(
             fn=handle_app_config_save,
-            inputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield, ui_initialized],
-            outputs=[llm_provider, embedding_provider, use_tools, use_rag, use_piillmshield],
+            inputs=[use_tools, use_rag, use_piillmshield, ui_initialized],
+            outputs=[use_tools, use_rag, use_piillmshield],
             api_visibility="private",
         )
 
